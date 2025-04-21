@@ -1,0 +1,27 @@
+@PostMapping("/{fileId}/add-to-folder/{folderId}")
+public ResponseEntity<?> addFileToFolder(@PathVariable Long fileId, @PathVariable Long folderId) {
+    Optional<FileEntity> optionalFile = fileRepository.findById(fileId);
+    Optional<FolderEntity> optionalFolder = folderRepository.findById(folderId);
+    if (optionalFile.isEmpty() || optionalFolder.isEmpty()) {
+        return ResponseEntity.badRequest().body("文件或文件夹不存在");
+    }
+    FileEntity file = optionalFile.get();
+    FolderEntity folder = optionalFolder.get();
+    file.getFolders().add(folder);
+    fileRepository.save(file);
+    return ResponseEntity.ok("添加成功");
+}
+
+@PutMapping("/{fileId}/remove-from-folder/{folderId}")
+public ResponseEntity<?> removeFileFromFolder(@PathVariable Long fileId, @PathVariable Long folderId) {
+    Optional<FileEntity> optionalFile = fileRepository.findById(fileId);
+    Optional<FolderEntity> optionalFolder = folderRepository.findById(folderId);
+    if (optionalFile.isEmpty() || optionalFolder.isEmpty()) {
+        return ResponseEntity.badRequest().body("文件或文件夹不存在");
+    }
+    FileEntity file = optionalFile.get();
+    FolderEntity folder = optionalFolder.get();
+    file.getFolders().remove(folder);
+    fileRepository.save(file);
+    return ResponseEntity.ok("移除成功");
+}

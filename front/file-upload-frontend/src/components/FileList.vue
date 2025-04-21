@@ -13,13 +13,18 @@
 
     <el-scrollbar class="scroll-area" native>
       <ul>
-        <template v-for="file in files" :key="file.id">
-          <el-tooltip :content="file.filename" placement="top">
-            <li
+        <template v-if="files && files.length">
+          <el-tooltip
+            v-for="file in files"
+            :key="file.id"
+            :content="file.filename"
+            placement="top"
+          >
+            <li @click.stop
               class="file-item"
               draggable="true"
               @dragstart="handleDragStart(file)"
-              @contextmenu.prevent="openContextMenu(file, $event)"
+              @contextmenu.prevent.stop="openContextMenu(file, $event)"
             >
               📄 {{ file.filename }}
             </li>
@@ -35,64 +40,34 @@
       :style="contextStyle"
     >
       <div @click="removeFile">🗑 删除文件</div>
+      <div @click="downloadFile">⬇ 下载文件</div>
     </div>
   </el-aside>
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Minus } from '@element-plus/icons-vue'
 import axios from 'axios'
 
+defineProps({
+  files: Array
+})
+const emit = defineEmits(['toggle-hide'])
 
-const files = ref([])
-const contextFile = ref(null)
 const contextMenuVisible = ref(false)
+const contextFile = ref(null)
 const contextStyle = ref({ top: '0px', left: '0px' })
-const emit = defineEmits(['toggle-hide', 'refresh'])
-const file = ref(null)
 
-// ✅ 加载文件列表
-async function fetchFiles() {
-  try {
-    const res = await axios.get('/api/files')
-    files.value = res.data
-  } catch (e) {
-    ElMessage.error('获取文件列表失败')
-  }
-}
-
-// ✅ 拖拽
 function handleDragStart(file) {
+  if (!file) return
   event.dataTransfer.setData('text/plain', file.filename)
   event.dataTransfer.setData('file-id', file.id)
 }
 
-function handleFileChange(e) {
-  file.value = e.target.files[0]
-}
-
-async function uploadFile() {
-  if (!file.value) return ElMessage.warning('请选择文件')
-
-  const formData = new FormData()
-  formData.append('file', file.value)
-
-  try {
-    await axios.post('/api/files/upload', formData)
-    ElMessage.success('上传成功')
-    file.value = null
-    emit('refresh')  // ✅ 通知 App.vue 刷新文件列表
-  } catch (e) {
-    ElMessage.error('上传失败')
-  }
-}
-// ================= 右键菜单逻辑 ===================
-
-
 function openContextMenu(file, event) {
-  event.preventDefault()
+  if (!file || !file.id) return
   contextFile.value = file
   contextStyle.value = {
     top: `${event.clientY}px`,
@@ -101,29 +76,44 @@ function openContextMenu(file, event) {
   contextMenuVisible.value = true
 }
 
-// ✅ 删除文件
 async function removeFile() {
   if (!contextFile.value) return
   try {
     await axios.delete(`/api/files/${contextFile.value.id}`)
-    ElMessage.success(`已删除 ${contextFile.value.filename}`)
+    ElMessage.success(`文件「${contextFile.value.filename}」已删除`)
     contextFile.value = null
     contextMenuVisible.value = false
-    fetchFiles() // 删除后刷新列表
+    emit('refresh')
   } catch (e) {
     ElMessage.error('删除失败')
   }
 }
 
-// ✅ 自动隐藏菜单
+function downloadFile() {
+  if (!contextFile.value || !contextFile.value.filename) return
+  const filename = contextFile.value.filename
+  axios({
+    url: `/api/files/download/${filename}`,
+    method: 'GET',
+    responseType: 'blob'
+  }).then(response => {
+    const url = window.URL.createObjectURL(new Blob([response.data]))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', filename)
+    document.body.appendChild(link)
+    link.click()
+  }).catch(() => {
+    ElMessage.error('下载失败')
+  })
+
+  contextMenuVisible.value = false
+}
+
 onMounted(() => {
   window.addEventListener('click', () => {
     contextMenuVisible.value = false
   })
-  fetchFiles()
-})
-defineExpose({
-  fetchFiles
 })
 </script>
 
@@ -144,13 +134,13 @@ defineExpose({
 .scroll-area {
   max-height: calc(100vh - 80px);
   overflow-y: auto;
-  scrollbar-width: none;             /* Firefox */
-  -ms-overflow-style: none;          /* IE 10+ */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 .scroll-area::-webkit-scrollbar {
   width: 0;
   height: 0;
-  display: none;                     /* Chrome/Safari */
+  display: none;
 }
 
 .file-item {
@@ -160,11 +150,6 @@ defineExpose({
   border-radius: 6px;
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-
 }
 .file-item:hover {
   background: #f0f0f0;

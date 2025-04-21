@@ -1,7 +1,7 @@
 <template>
   <div>
     <h2>文件上传</h2>
-    <input type="file" @change="handleFileUpload" />
+    <input type="file" multiple @change="handleFileUpload" />
     <button @click="uploadFile">上传</button>
 
     <h2>文件下载</h2>
@@ -14,22 +14,38 @@
 import axios from 'axios';
 
 export default {
+  emits: ['refresh'], // ✅ 声明事件
   data() {
     return {
-      selectedFile: null,
+      selectedFiles: [],
       downloadFilename: ''
     };
   },
   methods: {
     handleFileUpload(event) {
-      this.selectedFile = event.target.files[0];
+      this.selectedFiles = Array.from(event.target.files);
     },
     uploadFile() {
-      const formData = new FormData();
-      formData.append("file", this.selectedFile);
-      axios.post("/api/files/upload", formData)
-        .then(res => alert("上传成功: " + res.data))
-        .catch(err => alert("上传失败"));
+      if (this.selectedFiles.length === 0) {
+        alert("请先选择文件")
+        return
+      }
+
+      const uploadPromises = this.selectedFiles.map(file => {
+        const formData = new FormData()
+        formData.append("file", file)
+        return axios.post("/api/files/upload", formData)
+      })
+
+      Promise.all(uploadPromises)
+        .then(() => {
+          alert("全部上传成功")
+          this.$emit('refresh') // ✅ 通知父组件刷新
+          this.selectedFiles = [] // 清空
+        })
+        .catch(() => {
+          alert("部分上传失败")
+        })
     },
     downloadFile() {
       axios({
@@ -47,6 +63,7 @@ export default {
     }
   }
 };
+
 </script>
 
 <style scoped>

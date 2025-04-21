@@ -13,16 +13,18 @@
 
     <el-scrollbar class="scroll-area" native>
       <ul>
-        <li
-          v-for="file in files"
-          :key="file"
-          class="file-item"
-          draggable="true"
-          @dragstart="handleDragStart(file)"
-          @contextmenu.prevent="openContextMenu(file, $event)"
-        >
-          📄 {{ file }}
-        </li>
+        <template v-for="file in files" :key="file.id">
+          <el-tooltip :content="file.filename" placement="top">
+            <li
+              class="file-item"
+              draggable="true"
+              @dragstart="handleDragStart(file)"
+              @contextmenu.prevent="openContextMenu(file, $event)"
+            >
+              📄 {{ file.filename }}
+            </li>
+          </el-tooltip>
+        </template>
       </ul>
     </el-scrollbar>
 
@@ -41,23 +43,53 @@
 import { ref, nextTick, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Minus } from '@element-plus/icons-vue'
+import axios from 'axios'
 
-defineEmits(['toggle-hide'])
 
-const files = ref([
-  '文件1.pdf',
-  '文档2.docx',
-  '图片3.png'
-])
+const files = ref([])
+const contextFile = ref(null)
+const contextMenuVisible = ref(false)
+const contextStyle = ref({ top: '0px', left: '0px' })
+const emit = defineEmits(['toggle-hide', 'refresh'])
+const file = ref(null)
 
-function handleDragStart(file) {
-  event.dataTransfer.setData('text/plain', file)
+// ✅ 加载文件列表
+async function fetchFiles() {
+  try {
+    const res = await axios.get('/api/files')
+    files.value = res.data
+  } catch (e) {
+    ElMessage.error('获取文件列表失败')
+  }
 }
 
+// ✅ 拖拽
+function handleDragStart(file) {
+  event.dataTransfer.setData('text/plain', file.filename)
+  event.dataTransfer.setData('file-id', file.id)
+}
+
+function handleFileChange(e) {
+  file.value = e.target.files[0]
+}
+
+async function uploadFile() {
+  if (!file.value) return ElMessage.warning('请选择文件')
+
+  const formData = new FormData()
+  formData.append('file', file.value)
+
+  try {
+    await axios.post('/api/files/upload', formData)
+    ElMessage.success('上传成功')
+    file.value = null
+    emit('refresh')  // ✅ 通知 App.vue 刷新文件列表
+  } catch (e) {
+    ElMessage.error('上传失败')
+  }
+}
 // ================= 右键菜单逻辑 ===================
-const contextMenuVisible = ref(false)
-const contextFile = ref(null)
-const contextStyle = ref({ top: '0px', left: '0px' })
+
 
 function openContextMenu(file, event) {
   event.preventDefault()
@@ -69,19 +101,29 @@ function openContextMenu(file, event) {
   contextMenuVisible.value = true
 }
 
-function removeFile() {
-  if (contextFile.value) {
-    files.value = files.value.filter(f => f !== contextFile.value)
-    ElMessage.success(`文件「${contextFile.value}」已删除`)
+// ✅ 删除文件
+async function removeFile() {
+  if (!contextFile.value) return
+  try {
+    await axios.delete(`/api/files/${contextFile.value.id}`)
+    ElMessage.success(`已删除 ${contextFile.value.filename}`)
     contextFile.value = null
     contextMenuVisible.value = false
+    fetchFiles() // 删除后刷新列表
+  } catch (e) {
+    ElMessage.error('删除失败')
   }
 }
 
+// ✅ 自动隐藏菜单
 onMounted(() => {
   window.addEventListener('click', () => {
     contextMenuVisible.value = false
   })
+  fetchFiles()
+})
+defineExpose({
+  fetchFiles
 })
 </script>
 
@@ -118,6 +160,11 @@ onMounted(() => {
   border-radius: 6px;
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+
 }
 .file-item:hover {
   background: #f0f0f0;

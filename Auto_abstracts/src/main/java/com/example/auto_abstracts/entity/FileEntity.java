@@ -1,10 +1,13 @@
 package com.example.auto_abstracts.entity;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
 import jakarta.persistence.*;
-
-import java.time.LocalDateTime;
+import lombok.Data;
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
+@Data
 @Table(name = "files")
 public class FileEntity {
     @Id
@@ -13,60 +16,15 @@ public class FileEntity {
 
     private String filename;
     private String filepath;
-    private Long size;
+    private long size;
+    private String uploadTime;
 
-    @Column(name = "upload_time")
-    private LocalDateTime uploadTime;
-
-    private Long folderId; // 可选：如果你之后要做分类
-    // Getter 和 Setter
-
-    public Long getId() {
-        return id;
-    }
-
-    public void setId(Long id) {
-        this.id = id;
-    }
-
-    public String getFilename() {
-        return filename;
-    }
-
-    public void setFilename(String filename) {
-        this.filename = filename;
-    }
-
-    public String getFilepath() {
-        return filepath;
-    }
-
-    public void setFilepath(String filepath) {
-        this.filepath = filepath;
-    }
-
-    public Long getSize() {
-        return size;
-    }
-
-    public void setSize(Long size) {
-        this.size = size;
-    }
-
-    public LocalDateTime getUploadTime() {
-        return uploadTime;
-    }
-
-    public void setUploadTime(LocalDateTime uploadTime) {
-        this.uploadTime = uploadTime;
-    }
-
-    public Long getFolderId() {
-        return folderId;
-    }
-
-    public void setFolderId(Long folderId) {
-        this.folderId = folderId;
-    }
+    @ManyToMany
+    @JsonBackReference  // 防止循环引用
+    @JoinTable(
+            name = "folder_file",
+            joinColumns = @JoinColumn(name = "file_id"),
+            inverseJoinColumns = @JoinColumn(name = "folder_id")
+    )
+    private Set<FolderEntity> folders = new HashSet<>();
 }
-

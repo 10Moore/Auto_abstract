@@ -1,270 +1,582 @@
 <template>
   <el-aside width="260px" class="sidebar">
-    <div class="sidebar-header">
+    <div class="folder-header">
       <h3>📁 我的文件夹</h3>
-      <el-button
-        type="primary"
-        :icon="Plus"
-        size="small"
-        circle
-        @click="addFolder"
+      <el-button 
+        :icon="Plus" 
+        size="small" 
+        circle 
+        @click="addFolder" 
       />
     </div>
 
-    <el-scrollbar height="calc(100vh - 100px)">
-      <el-collapse v-model="activeFolders">
-        <el-collapse-item
-          v-for="folder in folders"
-          :key="folder.id"
-          :name="folder.id"
-          @drop="handleDrop($event, folder)"
-          @dragover.prevent
-        >
-          <template #title>
-            <div class="folder-header">
-              <el-input
-                v-model="folder.name"
-                size="small"
-                placeholder="文件夹名称"
-                @change="updateFolder(folder)"
-                class="folder-name-input"
-              />
-              <el-button
-                :icon="Delete"
-                size="small"
-                circle
-                type="danger"
-                @click.stop="deleteFolder(folder.id)"
-              />
-            </div>
+    <el-scrollbar class="folder-scrollbar">
+      <div
+        v-for="folder in folders"
+        :key="folder.id"
+        class="folder-item"
+        @dragover.prevent="handleDragOver($event, folder.id)"
+        @dragleave="handleDragLeave"
+        @drop="handleDropToFolder(folder.id, $event)"
+        :class="{ 'drag-over': dragOverFolderId === folder.id }"
+      >
+        <div class="folder-title" @click="toggleFolder(folder)">
+          <!-- 可编辑的文件夹名称 -->
+          <template v-if="folder.editing">
+            <el-input
+              v-model="folder.editName"
+              size="small"
+              @blur="saveFolderName(folder)"
+              @keyup.enter="saveFolderName(folder)"
+              autofocus
+              @click.stop
+            />
           </template>
+          <template v-else>
+            <span 
+              class="folder-name" 
+              @dblclick.stop="startEditing(folder)"
+            >
+              {{ folder.name }}
+            </span>
+          </template>
+          
+          <el-button
+            :icon="Delete"
+            size="small"
+            circle
+            @click.stop="deleteFolder(folder.id)"
+          />
+        </div>
 
-          <div class="folder-body">
-            <span class="theme-label">主题：</span>
+        <div v-show="folder.expanded" class="folder-content">
+          <div class="folder-attribute">
+            <span class="attribute-label">主题：</span>
             <el-input
               v-model="folder.attribute"
               size="small"
+              @blur="updateFolder(folder)"
               placeholder="输入主题"
-              @change="updateFolder(folder)"
-              class="theme-input"
             />
           </div>
 
-          <!-- 显示归属的文件 -->
-          <ul class="folder-files" v-if="folder.files.length">
-            <li
-              v-for="file in folder.files"
-              :key="file"
-              class="folder-file"
-              draggable="true"
-              @dragstart="handleFileDragStart(file, folder)"
-              @contextmenu.prevent="openContextMenu(file, folder, $event)"
-            >
-              📄 {{ file }}
-            </li>
-          </ul>
-        </el-collapse-item>
-      </el-collapse>
+          <div class="file-list">
+            <div v-if="loadingFiles[folder.id]" class="loading-files">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              加载中...
+            </div>
+            
+            <template v-else>
+              <div
+                v-for="file in folderFiles[folder.id]"
+                :key="file.id"
+                class="file-item"
+                draggable="true"
+                @dragstart="handleDragStart(file, folder.id)"
+                @contextmenu.prevent="openContextMenu($event, file, folder)"
+              >
+                <span class="file-name">📄 {{ file.filename }}</span>
+                <el-icon 
+                  class="remove-file-icon" 
+                  @click.stop="removeFileFromFolder(file.id, folder.id)"
+                >
+                  <Close />
+                </el-icon>
+              </div>
+              <div v-if="!folderFiles[folder.id]?.length" class="empty-folder">
+                （暂无文件）
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
     </el-scrollbar>
 
     <!-- 右键菜单 -->
-    <el-dropdown
-      ref="contextMenu"
-      trigger="manual"
-      :visible="menuVisible"
-      :teleported="false"
-      @command="handleCommand"
+    <div
+      v-if="contextMenu.visible"
+      class="context-menu"
+      :style="{
+        left: `${contextMenu.x}px`,
+        top: `${contextMenu.y}px`
+      }"
     >
-      <template #dropdown>
-        <el-dropdown-menu>
-          <el-dropdown-item command="remove">从文件夹移除</el-dropdown-item>
-        </el-dropdown-menu>
-      </template>
-    </el-dropdown>
+      <div class="menu-item" @click="downloadContextFile">
+        <el-icon><Download /></el-icon>
+        <span>下载文件</span>
+      </div>
+      <div class="menu-item" @click="removeContextFile">
+        <el-icon><Delete /></el-icon>
+        <span>移除文件</span>
+      </div>
+    </div>
   </el-aside>
-
-  <!-- 右键菜单 -->
-  <div
-    v-if="contextMenuVisible"
-    class="context-menu"
-    :style="contextStyle"
-  >
-    <div @click="handleContextRemove">🗑 移除文件</div>
-  </div>
-
 </template>
 
 <script setup>
-import { ref, nextTick, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Delete, Plus } from '@element-plus/icons-vue'
+import { ref, reactive, onMounted } from 'vue'
+import { 
+  Plus, Delete, Close, Download, Loading 
+} from '@element-plus/icons-vue'
+import { ElMessage, ElLoading } from 'element-plus'
+import axios from 'axios'
 
-let folderIdCounter = 1000
+// 配置后端API地址（与您的Controller路径一致）
+const API_BASE = 'http://localhost:8080/api'
 
-const folders = ref([
-  { id: 1, name: '默认文件夹', attribute: '', files: [] }
-])
-const activeFolders = ref(['1'])
+const emit = defineEmits(['refresh'])
 
-// 拖拽时记录目标
-function handleDrop(event, folder) {
-  const fileName = event.dataTransfer.getData('text/plain')
-  if (fileName && !folder.files.includes(fileName)) {
-    folder.files.push(fileName)
-    ElMessage.success(`文件「${fileName}」添加到「${folder.name}」`)
-  }
-}
+// 状态管理
+const folders = ref([])
+const folderFiles = reactive({})
+const loadingFiles = reactive({})
+const dragOverFolderId = ref(null)
+const contextMenu = reactive({
+  visible: false,
+  x: 0,
+  y: 0,
+  file: null,
+  folder: null
+})
 
-// 文件拖出时记录起点（可做高亮等扩展）
-function handleFileDragStart(file, folder) {
-  event.dataTransfer.setData('text/plain', file)
-  event.dataTransfer.setData('from-folder', folder.id)
-}
-
-// ---------- 右键菜单逻辑 ----------
-const contextMenu = ref(null)
-const menuVisible = ref(false)
-const selectedFile = ref(null)
-const selectedFolder = ref(null)
-const menuPosition = ref({ x: 0, y: 0 })
-
-
-function handleCommand(command) {
-  menuVisible.value = false
-  if (command === 'remove' && selectedFile.value && selectedFolder.value) {
-    const folder = selectedFolder.value
-    folder.files = folder.files.filter(f => f !== selectedFile.value)
-    ElMessage.success(`文件「${selectedFile.value}」已移除`)
-  }
-}
-
-// 其他函数不变
-function addFolder() {
-  const newFolder = {
-    id: folderIdCounter++,
-    name: '新建文件夹',
-    attribute: '',
-    files: []
-  }
-  folders.value.push(newFolder)
-  activeFolders.value.push(newFolder.id.toString())
-}
-function deleteFolder(id) {
-  folders.value = folders.value.filter(f => f.id !== id)
-  activeFolders.value = activeFolders.value.filter(i => i !== id.toString())
-  ElMessage.success('已删除文件夹')
-}
-function updateFolder(folder) {
-  ElMessage.success(`更新成功: ${folder.name}`)
-}
-
-
-// 右键菜单相关
-const contextMenuVisible = ref(false)
-const contextFile = ref(null)
-const contextFolder = ref(null)
-const contextStyle = ref({ top: '0px', left: '0px' })
-
+// 初始化加载
 onMounted(() => {
-  window.addEventListener('click', () => {
-    contextMenuVisible.value = false
+  loadFolders()
+})
+
+// 加载文件夹列表
+// 在 loadFolders() 方法中修改数据加载逻辑
+async function loadFolders() {
+  try {
+    const res = await axios.get(`${API_BASE}/folders`);
+    folders.value = res.data.map(f => ({ 
+      ...f,
+      expanded: false,
+      editing: false,    // 新增编辑状态
+      editName: ''       // 新增编辑暂存值
+    }));
+  } catch (error) {
+    handleApiError(error, '加载文件夹');
+  }
+}
+
+// 进入编辑模式
+function startEditing(folder) {
+  folder.editing = true;
+  folder.editName = folder.name;
+}
+
+// 保存修改
+async function saveFolderName(folder) {
+  if (!folder.editName?.trim()) {
+    ElMessage.warning("文件夹名不能为空");
+    folder.editing = false;
+    return;
+  }
+
+  try {
+    const res = await axios.put(
+      `${API_BASE}/folders/${folder.id}`,
+      { name: folder.editName },
+      { headers: { "Content-Type": "application/json" } }
+    );
+    
+    folder.name = folder.editName;
+    folder.editing = false;
+    ElMessage.success('名称修改成功');
+  } catch (error) {
+    console.error('修改失败:', error.response?.data);
+    ElMessage.error(`修改失败: ${error.response?.data?.message || error.message}`);
+    folder.editing = false;
+  }
+}
+
+
+// 添加文件夹（与您的后端createFolder匹配）
+async function addFolder() {
+  try {
+    const res = await axios.post(`${API_BASE}/folders`, {
+      name: "新建文件夹",
+      attribute: "未分类",
+      createTime: new Date().toISOString() // 添加时间戳
+    }, {
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    // 确保包含所有必要字段
+    folders.value.push({
+      id: res.data.id,
+      name: res.data.name,
+      attribute: res.data.attribute,
+      createTime: res.data.createTime,
+      expanded: true,
+      editing: false,
+      editName: ''
+    });
+    ElMessage.success('文件夹添加成功');
+  } catch (error) {
+    console.error('添加失败:', {
+      request: error.config,
+      response: error.response?.data
+    });
+    ElMessage.error(`添加失败: ${error.response?.data?.message || error.message}`);
+  }
+}
+
+
+// 删除文件夹（与您的后端deleteFolder匹配）
+async function deleteFolder(folderId) {
+  try {
+    await axios.delete(`${API_BASE}/folders/${folderId}`)
+    folders.value = folders.value.filter(f => f.id !== folderId)
+    delete folderFiles[folderId]
+    ElMessage.success('文件夹已删除')
+    emit('refresh')
+  } catch (error) {
+    console.error('删除失败详情:', error.response?.data)
+    ElMessage.error(`删除失败: ${error.response?.data?.message || error.message}`)
+  }
+}
+
+// 统一错误处理
+function handleApiError(error, action = '操作') {
+  console.error(`${action}失败:`, {
+    status: error.response?.status,
+    data: error.response?.data,
+    message: error.message
   })
-})
-
-function openContextMenu(file, folder, event) {
-  event.preventDefault()
-  contextFile.value = file
-  contextFolder.value = folder
-  contextStyle.value = {
-    top: `${event.clientY}px`,
-    left: `${event.clientX}px`
+  
+  let errMsg = error.response?.data?.message || 
+              error.response?.statusText || 
+              error.message
+  
+  // 处理Spring Boot的默认错误格式
+  if (error.response?.data?.error) {
+    errMsg = `${error.response.data.error}: ${error.response.data.message}`
   }
-  contextMenuVisible.value = true
+  
+  ElMessage.error(`${action}失败: ${errMsg}`)
 }
 
-function handleContextRemove() {
-  if (!contextFolder.value || !contextFile.value) return
-  contextFolder.value.files = contextFolder.value.files.filter(f => f !== contextFile.value)
-  ElMessage.success(`文件「${contextFile.value}」已移除`)
-  contextMenuVisible.value = false
-}
 
-// 暴露方法供 App.vue 调用
-defineExpose({
-  removeFileFromFolder(folderId, fileName) {
-    const folder = folders.value.find(f => f.id === folderId)
-    if (folder) {
-      folder.files = folder.files.filter(f => f !== fileName)
-      ElMessage.success(`文件「${fileName}」已从「${folder.name}」中移除`)
+// 更新文件夹信息
+async function updateFolder(folder) {
+  try {
+    const payload = {
+      name: String(folder.name || ''),
+      attribute: String(folder.attribute || '')
+    };
+
+    console.log('Sending payload:', payload);
+
+    const response = await axios.put(
+      `${API_BASE}/folders/${folder.id}`,
+      payload,
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        validateStatus: status => status < 500 // 允许400状态码继续处理
+      }
+    );
+
+    if (response.status === 400) {
+      throw new Error(response.data?.message || 'Invalid request');
     }
+
+    console.log('Update successful:', response.data);
+    ElMessage.success('更新成功');
+    return response.data;
+  } catch (error) {
+    console.error('Update error details:', {
+      message: error.message,
+      response: error.response?.data,
+      stack: error.stack
+    });
+
+    let userMessage = error.message;
+    if (error.response?.data) {
+      userMessage = error.response.data.error 
+        ? `${error.response.data.error}: ${error.response.data.message}`
+        : JSON.stringify(error.response.data);
+    }
+
+    ElMessage.error(`更新失败: ${userMessage}`);
+    throw error; // 继续向上抛出
   }
-})
+}
+
+// 加载文件夹内文件
+async function loadFolderFiles(folderId) {
+  loadingFiles[folderId] = true
+  try {
+    const res = await axios.get(`${API_BASE}/files/folder/${folderId}`)
+    folderFiles[folderId] = res.data
+  } catch (error) {
+    ElMessage.error(`加载文件失败: ${error.message}`)
+    folderFiles[folderId] = []
+  } finally {
+    loadingFiles[folderId] = false
+  }
+}
+
+// 切换文件夹展开状态
+function toggleFolder(folder) {
+  folder.expanded = !folder.expanded
+  if (folder.expanded && !folderFiles[folder.id]) {
+    loadFolderFiles(folder.id)
+  }
+}
+
+// 拖拽处理
+// 在拖拽开始时设置数据
+function handleDragStart(file, folderId) {
+  event.dataTransfer.setData('file-id', file.id);
+  event.dataTransfer.setData('file-name', file.filename);
+  event.dataTransfer.setData('file-data', JSON.stringify(file)); // 完整文件数据
+  event.dataTransfer.effectAllowed = 'copy'; // 明确允许复制操作
+}
+
+function handleDragOver(event, folderId) {
+  event.preventDefault()
+  dragOverFolderId.value = folderId
+}
+
+function handleDragLeave() {
+  dragOverFolderId.value = null
+}
+
+async function handleDropToFolder(folderId, event) {
+  event.preventDefault();
+  dragOverFolderId.value = null;
+
+  const fileId = event.dataTransfer.getData('file-id');
+  if (!fileId) return;
+
+  const loadingInstance = ElLoading.service({
+    lock: true,
+    text: '正在关联文件...'
+  });
+
+  try {
+    // 修改为已存在的后端接口路径
+    const res = await axios.post(
+      `${API_BASE}/files/${fileId}/copy-to-folder/${folderId}`
+    );
+    
+    await loadFolderFiles(folderId);
+    ElMessage.success(res.data || '文件关联成功');
+    emit('refresh');
+  } catch (error) {
+    console.error('关联失败详情:', {
+      request: error.config,
+      response: error.response?.data
+    });
+    ElMessage.error(`关联失败: ${error.response?.data || error.message}`);
+  } finally {
+    loadingInstance.close();
+  }
+}
+
+// 从文件夹移除文件
+async function removeFileFromFolder(fileId, folderId) {
+  try {
+    await axios.put(`${API_BASE}/files/${fileId}/remove-from-folder/${folderId}`)
+    folderFiles[folderId] = folderFiles[folderId].filter(f => f.id !== fileId)
+    ElMessage.success('文件已移除')
+    emit('refresh')
+  } catch (error) {
+    console.error('移除失败详情:', error.response?.data)
+    ElMessage.error(`移除失败: ${error.response?.data?.message || error.message}`)
+  }
+}
+// 右键菜单
+function openContextMenu(event, file, folder) {
+  event.preventDefault()
+  contextMenu.visible = true
+  contextMenu.x = event.clientX
+  contextMenu.y = event.clientY
+  contextMenu.file = file
+  contextMenu.folder = folder
+}
+
+function downloadContextFile() {
+  if (!contextMenu.file) return
+  const link = document.createElement('a')
+  link.href = `${API_BASE}/files/download/${contextMenu.file.filename}`
+  link.download = contextMenu.file.filename
+  link.click()
+  closeContextMenu()
+}
+
+function removeContextFile() {
+  if (!contextMenu.file || !contextMenu.folder) return
+  removeFileFromFolder(contextMenu.file.id, contextMenu.folder.id)
+  closeContextMenu()
+}
+
+function closeContextMenu() {
+  contextMenu.visible = false
+}
+
+// 点击其他地方关闭菜单
+window.addEventListener('click', closeContextMenu)
 </script>
 
 <style scoped>
 .sidebar {
-  background-color: #f4f6f8;
-  border-right: 1px solid #ddd;
-  padding: 16px 12px;
+  height: 100%;
+  background-color: #f8f9fa;
+  border-right: 1px solid #e0e0e0;
+  padding: 12px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
 }
-.sidebar-header {
+
+.folder-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding: 8px 4px;
   margin-bottom: 12px;
 }
-.folder-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+
+.folder-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
 }
-.folder-body {
-  display: flex;
-  align-items: center;
-  margin-top: 10px;
-  padding-left: 4px;
-  gap: 8px;
-}
-.folder-name-input {
+
+.folder-scrollbar {
   flex: 1;
+  height: 0;
 }
-.theme-label {
-  font-size: 13px;
-  color: #555;
+
+.folder-item {
+  margin-bottom: 8px;
+  background: white;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.folder-item.drag-over {
+  border: 2px dashed #409eff;
+  background-color: #f0f7ff;
+}
+
+.folder-title {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
+
+.folder-title:hover {
+  background-color: #f5f5f5;
+}
+
+.folder-name {
+  flex: 1;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.theme-input {
-  width: 100px;
+
+.folder-content {
+  padding: 0 12px 12px;
 }
-.folder-files {
-  padding: 4px 8px;
-  margin-top: 8px;
+
+.folder-attribute {
+  margin-bottom: 8px;
 }
-.folder-file {
-  font-size: 14px;
-  color: #333;
-  padding: 4px 6px;
+
+.attribute-label {
+  font-size: 13px;
+  color: #666;
+}
+
+.file-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.file-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 8px;
+  margin-bottom: 4px;
+  background: #f5f7fa;
   border-radius: 4px;
-  cursor: grab;
+  cursor: move;
 }
-.folder-file:hover {
-  background-color: #f0f0f0;
+
+.file-item:hover {
+  background: #e4e7ed;
+}
+
+.file-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.remove-file-icon {
+  color: #c0c4cc;
+  font-size: 14px;
+  margin-left: 4px;
+  cursor: pointer;
+}
+
+.remove-file-icon:hover {
+  color: #f56c6c;
+}
+
+.empty-folder {
+  color: #999;
+  font-size: 13px;
+  text-align: center;
+  padding: 8px;
+  font-style: italic;
+}
+
+.loading-files {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #999;
+  padding: 8px;
+  font-size: 13px;
 }
 
 .context-menu {
   position: fixed;
-  background: #fff;
-  border: 1px solid #ccc;
-  padding: 6px 12px;
+  background: white;
   border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  z-index: 1000;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  z-index: 2000;
+  min-width: 120px;
+}
+
+.menu-item {
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
   cursor: pointer;
+}
+
+.menu-item:hover {
+  background-color: #f5f5f5;
+}
+
+.menu-item .el-icon {
+  margin-right: 6px;
   font-size: 14px;
 }
-.context-menu div:hover {
-  background: #f5f5f5;
-}
-
-
 </style>
