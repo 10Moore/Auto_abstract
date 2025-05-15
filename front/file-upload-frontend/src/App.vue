@@ -4,13 +4,22 @@
     <Sidebar
       :files="allFiles"
       @refresh="refreshAllData"
+      @show-summary="showSummary"
     />
 
     <!-- 中间主区域 -->
     <main class="main" @dragover.prevent @drop="handleMainAreaDrop">
       <FileUploader @refresh="refreshAllData" />
-      <SearchBox :files="filteredFiles" />
+      <SearchBox :files="filteredFiles" @show-summary="showSummary" />
       <DownloadBox />
+
+      <!-- 摘要展示区域 -->
+      <SummaryView 
+        v-if="showSummaryPanel" 
+        :content="currentSummary"
+        :file-id="currentFileId" 
+        @close="hideSummary"
+      />
 
       <!-- 展开右侧边栏按钮 -->
       <div 
@@ -28,6 +37,7 @@
       :files="allFiles"
       @toggle-hide="toggleRightSidebar"
       @refresh="refreshAllData"
+      @show-summary="showSummary"
     />
   </div>
 </template>
@@ -44,11 +54,17 @@ import FileList from './components/FileList.vue'
 import FileUploader from './components/FileUploader.vue'
 import SearchBox from './components/SearchBox.vue'
 import DownloadBox from './components/DownloadBox.vue'
+import SummaryView from './components/SummaryView.vue'
+
 
 // 状态管理
 const allFiles = ref([])
 const showRightSidebar = ref(true)
 const searchQuery = ref('')
+const showSummaryPanel = ref(false)
+const currentSummary = ref('')
+const currentFileId = ref(null)
+
 
 // 计算属性：过滤文件列表
 const filteredFiles = computed(() => {
@@ -96,6 +112,23 @@ async function handleMainAreaDrop(event) {
   } catch (error) {
     ElMessage.error('操作失败: ' + error.message)
   }
+}
+
+async function showSummary(fileId) {
+  currentFileId.value = fileId;  // 更新当前文件ID
+  try {
+    const res = await axios.get(`/api/summaries/${fileId}`)
+    currentSummary.value = res.data.content;
+    showSummaryPanel.value = true;
+  } catch (error) {
+    ElMessage.error('获取摘要失败');
+  }
+}
+
+
+function hideSummary() {
+  showSummaryPanel.value = false
+  currentSummary.value = ''
 }
 
 // 切换右侧边栏

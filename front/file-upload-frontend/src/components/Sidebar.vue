@@ -35,10 +35,12 @@
           <template v-else>
             <span 
               class="folder-name" 
+              :title="folder.name"
               @dblclick.stop="startEditing(folder)"
             >
               {{ folder.name }}
             </span>
+
           </template>
           
           <el-button
@@ -73,9 +75,15 @@
                 class="file-item"
                 draggable="true"
                 @dragstart="handleDragStart(file, folder.id)"
+                @click="$emit('show-summary', file.id)"
                 @contextmenu.prevent="openContextMenu($event, file, folder)"
               >
-                <span class="file-name">📄 {{ file.filename }}</span>
+                <span class="file-name" :title="file.filename">📄 {{ file.filename }}</span>
+                <div class="relevance-stars" v-if="file.relevance">
+                  <el-icon v-for="i in 5" :key="i" :class="{ 'active-star': i <= file.relevance }">
+                    <Star />
+                  </el-icon>
+                </div>
                 <el-icon 
                   class="remove-file-icon" 
                   @click.stop="removeFileFromFolder(file.id, folder.id)"
@@ -120,6 +128,7 @@ import {
 } from '@element-plus/icons-vue'
 import { ElMessage, ElLoading } from 'element-plus'
 import axios from 'axios'
+import { Star } from '@element-plus/icons-vue'
 
 // 配置后端API地址（与您的Controller路径一致）
 const API_BASE = 'http://localhost:8080/api'
@@ -360,12 +369,29 @@ async function handleDropToFolder(folderId, event) {
   });
 
   try {
+    // 1. 先计算相关度
+    console.log('正在请求相关度计算，fileId:', fileId, 'folderId:', folderId); // 添加日志
+    const relevanceRes = await axios.get(`${API_BASE}/files/${fileId}/relevance/${folderId}`);
+    console.log('相关度返回结果:', relevanceRes.data); // 添加日志
+
+
     // 修改为已存在的后端接口路径
     const res = await axios.post(
       `${API_BASE}/files/${fileId}/copy-to-folder/${folderId}`
     );
     
     await loadFolderFiles(folderId);
+
+    console.log('文件夹文件加载完成:', folderFiles[folderId]); // 添加日志
+    
+    if (folderFiles[folderId]) {
+      const file = folderFiles[folderId].find(f => f.id == fileId);
+      if (file) {
+        file.relevance = relevanceRes.data;
+        console.log('文件相关度已设置:', file); // 添加日志
+      }
+    }
+
     ElMessage.success(res.data || '文件关联成功');
     emit('refresh');
   } catch (error) {
@@ -378,6 +404,8 @@ async function handleDropToFolder(folderId, event) {
     loadingInstance.close();
   }
 }
+
+
 
 // 从文件夹移除文件
 async function removeFileFromFolder(fileId, folderId) {
@@ -578,5 +606,20 @@ window.addEventListener('click', closeContextMenu)
 .menu-item .el-icon {
   margin-right: 6px;
   font-size: 14px;
+}
+/* 添加星星样式 */
+.relevance-stars {
+  display: flex;
+  margin-left: 8px;
+}
+
+.relevance-stars .el-icon {
+  color: #c0c4cc;
+  font-size: 14px;
+  margin-right: 2px;
+}
+
+.relevance-stars .active-star {
+  color: #f7ba2a;
 }
 </style>

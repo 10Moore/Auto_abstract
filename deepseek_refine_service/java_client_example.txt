@@ -1,0 +1,24 @@
+public String callRefineSummaryViaPython(String content) {
+    try {
+        RestTemplate restTemplate = new RestTemplate();
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        Map<String, String> request = Map.of("text", content);
+        HttpEntity<Map<String, String>> requestEntity = new HttpEntity<>(request, headers);
+
+        ResponseEntity<String> response = restTemplate.postForEntity(
+            "http://localhost:5000/refine-summary",
+            requestEntity,
+            String.class
+        );
+
+        if (response.getStatusCode() == HttpStatus.OK) {
+            return response.getBody();
+        } else {
+            throw new RuntimeException("Refine摘要服务调用失败：" + response.getStatusCode());
+        }
+    } catch (Exception e) {
+        throw new RuntimeException("无法调用Refine摘要服务", e);
+    }
+}

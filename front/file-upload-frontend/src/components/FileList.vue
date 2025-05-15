@@ -24,6 +24,7 @@
               class="file-item"
               draggable="true"
               @dragstart="handleDragStart(file)"
+              @click="$emit('show-summary', file.id)"
               @contextmenu.prevent.stop="openContextMenu(file, $event)"
             >
               📄 {{ file.filename }}
@@ -54,7 +55,7 @@ import axios from 'axios'
 defineProps({
   files: Array
 })
-const emit = defineEmits(['toggle-hide'])
+const emit = defineEmits(['toggle-hide', 'show-summary'])
 
 const contextMenuVisible = ref(false)
 const contextFile = ref(null)
@@ -150,6 +151,10 @@ onMounted(() => {
   border-radius: 6px;
   cursor: pointer;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .file-item:hover {
   background: #f0f0f0;

@@ -1,7 +1,12 @@
 package com.example.auto_abstracts.controller;
 import com.example.auto_abstracts.entity.FileEntity;
+import com.example.auto_abstracts.entity.FolderEntity;
+import com.example.auto_abstracts.entity.FolderFileRatingId;
 import com.example.auto_abstracts.repository.FileRepository;
+import com.example.auto_abstracts.repository.FolderFileRatingRepository;
+import com.example.auto_abstracts.repository.FolderRepository;
 import com.example.auto_abstracts.service.FileService;
+import com.example.auto_abstracts.service.SummaryService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.Resource;
@@ -23,6 +28,15 @@ public class FileController {
 
     @Autowired
     private FileRepository fileRepository;
+
+    @Autowired
+    private FolderFileRatingRepository folderFileRatingRepository;
+
+    @Autowired
+    private FolderRepository folderRepository;
+
+    @Autowired
+    private SummaryService summaryService;
 
     // ✅ 上传文件
     @PostMapping("/upload")
@@ -80,18 +94,66 @@ public class FileController {
 // remove-from-folder端点保持不变
 
     // ✅ 从某个文件夹中移除某个文件（解除关联，不删除文件）
+//    @PutMapping("/{fileId}/remove-from-folder/{folderId}")
+//    public ResponseEntity<String> removeFileFromFolder(@PathVariable Long fileId, @PathVariable Long folderId) {
+//        try {
+//            fileService.removeFileFromFolder(fileId, folderId);
+//            return ResponseEntity.ok("文件已移除");
+//        } catch (Exception e) {
+//            return ResponseEntity.badRequest().body("移除失败");
+//        }
+//    }
     @PutMapping("/{fileId}/remove-from-folder/{folderId}")
-    public ResponseEntity<String> removeFileFromFolder(@PathVariable Long fileId, @PathVariable Long folderId) {
+    public ResponseEntity<String> removeFileFromFolder(
+            @PathVariable Long fileId,
+            @PathVariable Long folderId) {
         try {
-            fileService.removeFileFromFolder(fileId, folderId);
+            // 先删除关联评分
+            folderFileRatingRepository.deleteById(new FolderFileRatingId(folderId, fileId));
+
+            // 再删除关联关系
+            FileEntity file = fileRepository.findById(fileId).orElseThrow();
+            FolderEntity folder = folderRepository.findById(folderId).orElseThrow();
+
+            file.getFolders().remove(folder);
+            folder.getFiles().remove(file);
+
+            fileRepository.save(file);
+            folderRepository.save(folder);
+
             return ResponseEntity.ok("文件已移除");
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body("移除失败");
+            return ResponseEntity.badRequest().body("移除失败: " + e.getMessage());
         }
     }
+
     @GetMapping("/folder/{folderId}")
     public ResponseEntity<List<FileEntity>> getFilesByFolder(@PathVariable Long folderId) {
-        List<FileEntity> files = fileService.findAllByFolderId(folderId);
+//        List<FileEntity> files = fileService.findAllByFolderId(folderId);
+        List<FileEntity> files = fileService.findAllByFolderIdWithRelevance(folderId); // 返回带相关度的文件列表
         return ResponseEntity.ok(files);
     }
+
+    // 在FileController.java中添加
+    @GetMapping("/{id}/summary")
+    public ResponseEntity<String> getFileSummary(@PathVariable Long id) {
+        return summaryService.findByFileId(id)
+                .map(summary -> ResponseEntity.ok(summary.getContent()))
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    // 星级
+    @GetMapping("/{fileId}/relevance/{folderId}")
+    public ResponseEntity<Integer> calculateRelevance(
+            @PathVariable Long fileId,
+            @PathVariable Long folderId) {
+        try {
+            int relevance = fileService.calculateRelevance(fileId, folderId);
+            return ResponseEntity.ok(relevance);
+        } catch (Exception e) {
+            return ResponseEntity.ok(1); // 默认返回1星
+        }
+    }
+
+
 }

@@ -17,6 +17,7 @@
                 class="file-item"
                 draggable="true"
                 @dragstart="handleDragStart(file)"
+                @click="$emit('show-summary', file.id)"
                 @contextmenu.prevent="openContextMenu(file, $event)"
               >
                 📄 {{ file.filename }}
