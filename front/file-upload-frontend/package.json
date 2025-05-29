@@ -10,7 +10,8 @@
     "axios": "^1.5.0",
     "element-plus": "^2.9.7",
     "markdown-it": "^14.1.0",
-    "vue": "^3.4.0"
+    "vue": "^3.4.0",
+    "vue-router": "^4.5.1"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.0.0",

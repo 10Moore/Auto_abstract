@@ -8,7 +8,7 @@ app = Flask(__name__)
 
 # 初始化 DeepSeek Chat 模型
 llm = DeepSeekChatModel.construct(api_key="sk-5de04e9f947f49c6991f0021779f8e0a")
-text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=300)
+text_splitter = RecursiveCharacterTextSplitter(chunk_size=3000, chunk_overlap=300)
 
 @app.route('/refine-summary', methods=['POST'])
 def refine_summary():
